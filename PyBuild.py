@@ -840,7 +840,7 @@ def BuildWindowsProjects(xboxDefined, xboxOnly, skipDebug):
 		#for conf in configurations:
 		if ".sln" in filename:
 			for conf in configurations:
-				command = [msBuildPath ,filename,"/p:Configuration="+conf,"/p:Platform=" + platform,"/m","/p:BuildInParallel=true","/nr:false","/clp:ErrorsOnly;Summary","/verbosity:minimal","/t:Build"]
+				command = [msBuildPath ,filename,"/p:Configuration="+conf,"/p:Platform=" + platform,"/m","/p:BuildInParallel=true","/nr:false","/clp:ErrorsOnly;Summary","/verbosity:diagnostic","/t:Build"]
 				retCode = ExecuteBuild(command, filename,conf, platform)
 		else:
 			command = [msBuildPath ,filename,"/p:Platform=" + platform,"/m", "/p:BuildInParallel=true","/nr:false","/clp:ErrorsOnly;WarningsOnly;Summary","/verbosity:minimal","/t:Build"]
