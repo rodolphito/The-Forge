@@ -115,6 +115,18 @@ uint        gDrawSpriteCount = 0;
                    (  0 << 16) |\
                    (  1 << 24)
 
+sl_sys_t ctx;
+sl_sockaddr4_t sockaddr_server = {0};
+sl_sockaddr4_t sockaddr_client = {0};
+sl_endpoint_t ep_server = {0};
+sl_endpoint_t ep_client = {0};
+sl_sock_t sock = {0};
+char mem_client[NETWORK_MTU];
+char mem_server[NETWORK_MTU];
+sl_buf_t buf = {0};
+struct timeval tval_last, tval_now, tval_delta;
+int received = 0;
+
 /// UI
 UIApp gAppUI;
 
@@ -388,136 +400,91 @@ static void createEntities(void* pData, uintptr_t i)
 	}
 }
 
-#define NETWORK_MTU 1400
-#define NETWORK_RATE 100
-#define NETWORK_SERVER_PORT 31152
-#define NETWORK_CLIENT_PORT 31153
-#define NETWORK_IP (127 <<  0)
-static void loadgen()
+static void openSockets()
 {
-    sl_sys_t ctx;
+    fprintf(stderr, "sl_sys_setup %d .\n", sl_sys_setup(&ctx));
+    ASSERT(1);
+    
+    sockaddr_server.af = ctx.af_inet;
+    sockaddr_server.port = NETWORK_SERVER_PORT;
+    sockaddr_server.addr = NETWORK_IP;
+    
+    sockaddr_client.af = ctx.af_inet;
+    sockaddr_client.port = NETWORK_CLIENT_PORT;
+    sockaddr_client.addr = NETWORK_IP;
 
-    ASSERT(sl_sys_setup(&ctx));
+    ep_server.addr4 = sockaddr_server;
+    ep_client.addr4 = sockaddr_client;
 
-    sl_sockaddr4_t server_addr = {0};
-    server_addr.af = ctx.af_inet;
-    server_addr.port = NETWORK_SERVER_PORT;
-    server_addr.addr = NETWORK_IP;
+    sock.proto = SL_SOCK_PROTO_UDP;
+    sock.type = SL_SOCK_TYPE_DGRAM;
+    #if RR_SERVER
+    sock.endpoint = ep_server;
+    buf.base = &mem_server[0];
+    #endif
+    #if RR_CLIENT
+    sock.endpoint = ep_client;
+    buf.base = &mem_client[0];
+    #endif
 
-    sl_sockaddr4_t client_addr = {0};
-    client_addr.af = ctx.af_inet;
-    client_addr.port = NETWORK_CLIENT_PORT;
-    client_addr.addr = NETWORK_IP;
-
-    sl_endpoint_t ep_server;
-    ep_server.addr4 = server_addr;
-
-    sl_endpoint_t ep_client;
-    ep_client.addr4 = client_addr;
-
-    sl_sock_t sock_client = {0};
-    sock_client.proto = SL_SOCK_PROTO_UDP;
-    sock_client.type = SL_SOCK_TYPE_DGRAM;
-    sock_client.endpoint = ep_client;
-
-    char pl_client[NETWORK_MTU];
-
-    sl_buf_t buf_client_send;
-    buf_client_send.base = &pl_client[0];
-    buf_client_send.len = NETWORK_MTU;
+    buf.len = NETWORK_MTU;
 
     for (int i = 0; i < NETWORK_MTU; i++) {
-        pl_client[i] = i ^ 0xb7 * (i >> 8);
+        mem_client[i] = i ^ 0xb7 * (i >> 8);
     }
 
-    struct timeval tval_last, tval_now, tval_delta;
+    fprintf(stderr, "sl_sock_create %d .\n", sl_sock_create(&sock, SL_SOCK_TYPE_DGRAM, SL_SOCK_PROTO_UDP));
+    fprintf(stderr, "sl_sock_bind %d .\n", sl_sock_bind(&sock));
 
-    ASSERT(sl_sock_create(&sock_client, SL_SOCK_TYPE_DGRAM, SL_SOCK_PROTO_UDP));
-    ASSERT(sl_sock_bind(&sock_client));
-
-    for(;;) {
-        gettimeofday(&tval_last, NULL);
-
-        ASSERT(NETWORK_MTU != sl_sock_send(&sock_client, &buf_client_send, 1, &ep_server));
-
-        gettimeofday(&tval_now, NULL);
-        timersub(&tval_now, &tval_last, &tval_delta);
-
-        if (NETWORK_RATE) {
-            while(tval_delta.tv_usec < (1000000 / NETWORK_RATE)) {
-                gettimeofday(&tval_now, NULL);
-                timersub(&tval_now, &tval_last, &tval_delta);
-            }
-        }
-    }
-    ASSERT(sl_sock_close(&sock_client));
-    ASSERT(sl_sys_cleanup(&ctx));
-}
-
-static void server()
-{
-    sl_sys_t ctx;
-
-    ASSERT(sl_sys_setup(&ctx));
-
-    sl_sockaddr4_t server_addr = {0};
-    server_addr.af = ctx.af_inet;
-    server_addr.port = NETWORK_SERVER_PORT;
-    server_addr.addr = NETWORK_IP;
-
-    sl_endpoint_t ep_server;
-    ep_server.addr4 = server_addr;
-
-    sl_sock_t sock_server = {0};
-    sock_server.proto = SL_SOCK_PROTO_UDP;
-    sock_server.type = SL_SOCK_TYPE_DGRAM;
-    sock_server.endpoint = ep_server;
-
-    char pl_client[NETWORK_MTU];
-    char mem_server[NETWORK_MTU];
-
-    sl_buf_t buf_server_recv;
-    buf_server_recv.base = &mem_server[0];
-    buf_server_recv.len = NETWORK_MTU;
-
-    for (int i = 0; i < NETWORK_MTU; i++) {
-        pl_client[i] = i ^ 0xb7 * (i >> 8);
-    }
-
-    struct timeval tval_last, tval_now, tval_delta;
-    int received = 0;
+    #if RR_SERVER
     gettimeofday(&tval_last, NULL);
-
-    ASSERT(sl_sock_create(&sock_server, SL_SOCK_TYPE_DGRAM, SL_SOCK_PROTO_UDP));
-    ASSERT(sl_sock_bind(&sock_server));
-    for(;;) {
-        int size = sl_sock_recv(&sock_server, &buf_server_recv, 1, &ep_server);
-        ASSERT(NETWORK_MTU < size);
-        ASSERT(memcmp(pl_client, buf_server_recv.base, size));
-        received++;
-
-        gettimeofday(&tval_now, NULL);
-
-        timersub(&tval_now, &tval_last, &tval_delta);
-
-        if (1 < tval_delta.tv_sec) {
-            gettimeofday(&tval_last, NULL);
-            fprintf(stderr, "Received %d packets.\n", received);
-            received = 0;
-        }
-    }
-    ASSERT(sl_sock_close(&sock_server));
-    ASSERT(sl_sys_cleanup(&ctx));
+    #endif
 }
 
-void network_loop(void* pData, uintptr_t i)
+static void listenSockets()
 {
-    #if SERVER
-    server();
+    #if RR_SERVER
+    int size = sl_sock_recv(&sock_server, &buf, 1, &ep_server);
+    //fprintf(stderr, "sl_sock_recv %d .\n", app_ctx.size < size);
+    //fprintf(stderr, "memcmp %d .\n", memcmp(mem_client, buf.base, size));
+    received++;
     #endif
-    #if CLIENT
-    client();
+
+    #if RR_CLIENT
+    fprintf(stderr, "sl_sock_send %d .\n", app_ctx.size != sl_sock_send(&sock_client, &buf, 1, &ep_server));
     #endif
+
+    gettimeofday(&tval_now, NULL);
+
+    timersub(&tval_now, &tval_last, &tval_delta);
+
+    #if RR_CLIENT
+    if (app_ctx.rate) {
+        while(tval_delta.tv_usec < (1000000 / app_ctx.rate)) {
+            gettimeofday(&tval_now, NULL);
+            timersub(&tval_now, &tval_last, &tval_delta);
+        }
+    }
+    #endif
+
+    #if RR_SERVER
+    if (1 < tval_delta.tv_sec) {
+        gettimeofday(&tval_last, NULL);
+        fprintf(stderr, "Received %d packets.\n", received);
+        received = 0;
+    }
+    #endif
+}
+
+static void closeSockets()
+{
+    #if RR_SERVER
+    fprintf(stderr, "sl_sock_close %d .\n", sl_sock_close(&sock_server));
+    #endif
+    #if RR_CLIENT
+    fprintf(stderr, "sl_sock_close %d .\n", sl_sock_close(&sock_client));
+    #endif
+    fprintf(stderr, "sl_sys_cleanup %d .\n", sl_sys_cleanup(&ctx));
 }
 
 class EntityComponentSystem: public IApp
@@ -680,8 +647,6 @@ class EntityComponentSystem: public IApp
 		bounds->xMax = 80.0f;
 		bounds->yMin = -50.0f;
 		bounds->yMax = 50.0f;
-		
-		addThreadSystemTask(pThreadSystem, &network_loop, 0, 0);
 
 		// THIS IS HOW YOU SERIALIZE AN ENTITY
 		//pSerializer->SerializeEntity(worldBoundsEntityId, "serializedWorldBounds", "../../../src/32_Network/Entities/");
@@ -745,6 +710,8 @@ class EntityComponentSystem: public IApp
 			updateDescriptorSet(pRenderer, i, pDescriptorSetUniforms, 1, params);
 		}
 
+        openSockets();
+
 		return true;
 	}
 
@@ -802,6 +769,8 @@ class EntityComponentSystem: public IApp
 		MoveComponentRepresentation::DESTROY_VAR_REPRESENTATIONS();
 		PositionComponentRepresentation::DESTROY_VAR_REPRESENTATIONS();
 		WorldBoundsComponentRepresentation::DESTROY_VAR_REPRESENTATIONS();
+
+        closeSockets();
 	}
 
 	bool Load()
@@ -907,6 +876,8 @@ class EntityComponentSystem: public IApp
 			spriteData.colB   = sprite.colorB;
 			spriteData.sprite = (float)sprite.spriteIndex;
 		}
+        
+        listenSockets();
 
 		gAppUI.Update(deltaTime);
 	}
