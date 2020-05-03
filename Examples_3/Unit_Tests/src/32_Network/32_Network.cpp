@@ -58,7 +58,8 @@
 
 //Networking
 #include "../../../../Common_3/ThirdParty/OpenSource/socklynx/socklynx.h"
-#include <sys/time.h>
+#include <chrono>
+using namespace std::chrono;
 
 //Math
 #include "../../../../Common_3/OS/Math/MathTypes.h"
@@ -124,7 +125,8 @@ sl_sock_t sock = {0};
 char mem_client[NETWORK_MTU];
 char mem_server[NETWORK_MTU];
 sl_buf_t buf = {0};
-struct timeval tval_last, tval_now, tval_delta;
+system_clock::time_point tval_last, tval_now;
+long long tval_delta;
 int received = 0;
 
 /// UI
@@ -454,22 +456,21 @@ static void listenSockets()
     fprintf(stderr, "sl_sock_send %d .\n", app_ctx.size != sl_sock_send(&sock_client, &buf, 1, &ep_server));
     #endif
 
-    gettimeofday(&tval_now, NULL);
-
-    timersub(&tval_now, &tval_last, &tval_delta);
+    tval_now = system_clock::now();
+    tval_delta = std::chrono::duration_cast<std::chrono::milliseconds>(tval_last - tval_now).count();
 
     #if RR_CLIENT
     if (app_ctx.rate) {
-        while(tval_delta.tv_usec < (1000000 / app_ctx.rate)) {
-            gettimeofday(&tval_now, NULL);
-            timersub(&tval_now, &tval_last, &tval_delta);
+        while(tval_delta < (1000 / app_ctx.rate)) {
+            tval_now = system_clock::now();
+            tval_delta = std::chrono::duration_cast<std::chrono::milliseconds>(tval_last - tval_now).count();
         }
     }
     #endif
 
     #if RR_SERVER
-    if (1 < tval_delta.tv_sec) {
-        gettimeofday(&tval_last, NULL);
+    if (1 < tval_delta) {
+        tval_last = system_clock::now();
         fprintf(stderr, "Received %d packets.\n", received);
         received = 0;
     }
